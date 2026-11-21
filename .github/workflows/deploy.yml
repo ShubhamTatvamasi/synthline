@@ -1,0 +1,50 @@
+# Deploy SYNTHLINE to GitHub Pages.
+#
+# Docs: https://docs.astro.build/en/guides/deploy/github/
+#
+# One-time repository setup:
+#   1. Push this repository to GitHub (repo name must match `base` in astro.config.mjs — default `/synthline`)
+#   2. In the repo: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+#
+# The site is then served at https://shubhamtatvamasi.com/synthline/
+name: Deploy to GitHub Pages
+
+on:
+  # Trigger the workflow every time you push to the `main` branch
+  push:
+    branches: [main]
+  # Allows you to run this workflow manually from the Actions tab on GitHub
+  workflow_dispatch:
+
+# Allow GITHUB_TOKEN to deploy to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between runs of the same branch
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v7
+      - name: Install, build, and upload your site
+        uses: withastro/action@v6
+        # with:
+        #   node-version: 24 # The specific version of Node to use. Defaults to 24. (optional)
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
