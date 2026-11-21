@@ -10,6 +10,8 @@ playable on desktop and mobile with keyboard, gamepad, or touch.
 ▶ https://shubhamtatvamasi.com/synthline/
 ```
 
+![SYNTHLINE](./public/og.jpg)
+
 ---
 
 ## The game
@@ -24,7 +26,12 @@ A 3-lap time attack on a closed neon circuit:
   a 26% top-speed surge with a widened FOV, screen shake, and exhaust flames.
 - **Ghost replay** — your best race is recorded and replayed as a translucent ghost
   car, so you can race yourself.
-- **Records** — best lap, best race, and the ghost persist in `localStorage`.
+- **Records** — best lap, best race, and the ghost persist in `localStorage`. The
+  HUD's `BEST` is your all-time best lap, and the results screen shows your best
+  lap plus the gap to your previous record.
+- **Accessible by default** — keyboard focus rings, `prefers-reduced-motion`
+  support, safe-area-aware touch controls, and a layout that survives short
+  landscape screens.
 - **Everything is procedural** — no image or audio files. Cars, scenery, the sun,
   the synthwave soundtrack, and the engine hum are all generated at runtime with
   Canvas 2D and the Web Audio API.
@@ -52,11 +59,13 @@ Auto-pauses when the tab loses focus. Touch layout respects safe-area insets.
 | Rendering      | Canvas 2D, segment-based pseudo-3D projection                          |
 | Audio          | Web Audio API — look-ahead scheduled synthwave loop + synthesized SFX  |
 | Fonts          | Orbitron & Share Tech Mono via Fontsource (self-hosted, SIL OFL)       |
-| CI/CD          | GitHub Actions → GitHub Pages (`withastro/action`)                     |
+| CI/CD          | GitHub Actions → GitHub Pages (`withastro/action`), gated by `astro check` |
+| Share card     | Static Open Graph image (`public/og.jpg`) + canonical/OG/Twitter meta  |
 
-The production bundle is ~220 KB total (fonts included); the game code gzips to
-roughly 22 KB. Draw distance adapts at runtime on slower devices, and device pixel
-ratio is capped at 2 to keep mobile GPUs happy.
+The page bundle is ~220 KB total (fonts included); the game code gzips to roughly
+18 KB. Draw distance adapts at runtime on slower devices, device pixel ratio is
+capped at 2 to keep mobile GPUs happy, and `prefers-reduced-motion` turns off
+screen shake, twinkling stars, and speed lines.
 
 ## Run locally
 
@@ -115,6 +124,10 @@ The page must live under the path configured as `base` in `astro.config.mjs`
   ```js
   base: '/race',
   ```
+
+  Also update the URL in `public/robots.txt` and `public/sitemap.xml` (both are
+  static files and cannot read `base`). `robots.txt`, `sitemap.xml`, and `og.jpg`
+  are copied into the build as-is.
 
 **Custom domain**
 

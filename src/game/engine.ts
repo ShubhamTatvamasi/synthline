@@ -18,7 +18,7 @@ import type {
   Segment,
   Track,
 } from './types';
-import { accelerate, clamp, formatTime, increase, lerp, overlap, wrapDelta } from './util';
+import { accelerate, clamp, increase, lerp, overlap, wrapDelta } from './util';
 
 export interface GameHooks {
   onHud: (hud: HudSnapshot) => void;
@@ -32,9 +32,13 @@ function loadBest(): BestRecord | null {
   try {
     const raw = localStorage.getItem(BEST_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as BestRecord;
-    if (typeof parsed?.totalMs !== 'number' || !Array.isArray(parsed?.ghost)) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<BestRecord> | null;
+    if (typeof parsed?.totalMs !== 'number' || !Array.isArray(parsed.ghost)) return null;
+    return {
+      totalMs: parsed.totalMs,
+      lapMs: Array.isArray(parsed.lapMs) ? parsed.lapMs : [],
+      ghost: parsed.ghost,
+    };
   } catch {
     return null;
   }
@@ -101,8 +105,11 @@ export class Game {
   private lastLap: number | null = null;
   private bestLap: number | null = null;
   private countdownT = 0;
+  private lastCountdownShown = 0;
   private goFlash = 0;
   private invulnT = 0;
+  /** Set when a collision teleports the player across the start line. */
+  private suppressLap = false;
 
   // boost
   private boostMeter: number = CFG.boostStart;
@@ -129,6 +136,13 @@ export class Game {
 
   private onVisibility = (): void => {
     if (document.hidden && (this.mode === 'racing' || this.mode === 'countdown') && !this.paused) {
+      this.pause();
+    }
+  };
+
+  /** Pause when the window loses focus (alt-tab, address bar, another app). */
+  private onBlur = (): void => {
+    if ((this.mode === 'racing' || this.mode === 'countdown') && !this.paused) {
       this.pause();
     }
   };
@@ -164,6 +178,7 @@ export class Game {
 
     document.addEventListener('visibilitychange', this.onVisibility);
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('blur', this.onBlur);
   }
 
   async init(): Promise<void> {
@@ -181,6 +196,7 @@ export class Game {
     this.audio.dispose();
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.onBlur);
   }
 
   private onResize = (): void => {
@@ -217,16 +233,14 @@ export class Game {
     this.ghostPtr = 0;
     this.ghost = null;
     this.countdownT = 3.999;
+    this.lastCountdownShown = 0;
     this.goFlash = 0;
     this.invulnT = 0;
+    this.suppressLap = false;
     this.toast = null;
     this.paused = false;
     this.mode = 'countdown';
     this.emitHud();
-  }
-
-  restart(): void {
-    this.beginRace();
   }
 
   toMenu(): void {
@@ -286,14 +300,6 @@ export class Game {
 
   get bestRaceMs(): number | null {
     return this.best?.totalMs ?? null;
-  }
-
-  get bestRaceLaps(): number[] {
-    return this.best?.lapMs ?? [];
-  }
-
-  formatBest(): string {
-    return formatTime(this.best?.totalMs ?? null);
   }
 
   // ————————————————————————————————————————————————————————————————
@@ -376,8 +382,6 @@ export class Game {
     this.audio.engineUpdate(0.05 + (3 - this.countdownT) * 0.02, false, dt, true);
   }
 
-  private lastCountdownShown = 0;
-
   private updateRacing(dt: number): void {
     const polled: PolledInput = this.input.poll();
     this.lastInput = polled;
@@ -426,7 +430,12 @@ export class Game {
     // — Advance + lap detection —
     const oldPos = this.position;
     this.position = increase(this.position, this.speed * dt, this.track.length);
-    if (this.position < oldPos) this.onLapCrossed();
+    if (this.position < oldPos) {
+      // A collision can shove the car backwards across the line; that must not
+      // count as a completed lap.
+      if (this.suppressLap) this.suppressLap = false;
+      else this.onLapCrossed();
+    }
 
     this.playerY = this.interpolateRoadY();
     this.skyOffset += 0.055 * playerSegment.curve * speedPct * dt;
@@ -445,7 +454,14 @@ export class Game {
     this.ghostTimer += dt;
     if (this.ghostTimer >= 0.1) {
       this.ghostTimer -= 0.1;
-      this.ghostRec.push({ t: this.raceTime, lap: this.lap, pos: this.position, x: this.playerX });
+      // Store the car's track position (not the camera's) so the replay lines
+      // up with the racing line instead of trailing PLAYER_Z behind it.
+      this.ghostRec.push({
+        t: this.raceTime,
+        lap: this.lap,
+        pos: increase(this.position + PLAYER_Z, 0, this.track.length),
+        x: this.playerX,
+      });
     }
     this.updateGhostPlayback();
 
@@ -481,7 +497,9 @@ export class Game {
         overlap(this.playerX, CFG.playerW * 2, car.offset, 0.32, 0.85)
       ) {
         this.speed = Math.min(this.speed, car.speed * 0.82);
+        const before = this.position;
         this.position = increase(car.z, -PLAYER_Z - 340, track.length);
+        if (this.position < before) this.suppressLap = true;
         this.shake = 1;
         this.invulnT = 0.9;
         this.boosting = false;
@@ -551,12 +569,15 @@ export class Game {
     if (this.mode !== 'racing') return;
     if (this.lapTime < 3000) return; // ignore immediate re-triggers
 
-    this.lapTimes.push(this.lapTime);
-    this.lastLap = this.lapTime;
-    if (this.bestLap === null || this.lapTime < this.bestLap) {
-      this.bestLap = this.lapTime;
-      if (this.lapTimes.length > 1) this.setToast('BEST LAP!', 1.6);
-    }
+    const lapMs = this.lapTime;
+    const bestEver =
+      this.best && this.best.lapMs.length > 0 ? Math.min(...this.best.lapMs) : null;
+    const isRecordLap = bestEver !== null && lapMs < bestEver;
+    const isSessionBest = this.bestLap === null || lapMs < this.bestLap;
+
+    this.lapTimes.push(lapMs);
+    this.lastLap = lapMs;
+    if (isSessionBest) this.bestLap = lapMs;
     this.lapTime = 0;
 
     if (this.lap >= CFG.totalLaps) {
@@ -567,11 +588,23 @@ export class Game {
       else this.setToast(`LAP ${this.lap} / ${CFG.totalLaps}`, 1.4);
       this.audio.lap();
     }
+
+    // Show the lap achievement last so it isn't immediately overwritten by the
+    // lap-counter toast.
+    if (this.mode === 'racing') {
+      if (isRecordLap) this.setToast('RECORD LAP!', 1.9);
+      else if (isSessionBest && this.lapTimes.length > 1) this.setToast('BEST LAP!', 1.6);
+    }
   }
 
   private finishRace(): void {
     this.mode = 'finished';
     this.ghost = null;
+    this.speed = 0;
+    this.steer = 0;
+    this.boosting = false;
+    this.boostGlow = 0;
+    this.lastInput = { steer: 0, accel: false, brake: false, boost: false };
     this.audio.finish();
     this.audio.stopEngine();
 
@@ -600,15 +633,17 @@ export class Game {
       this.ghost = null;
       return;
     }
+    // Once the replay has run past its last sample the ghost has finished its
+    // race — park it off-screen rather than freezing it at the line.
+    if (this.raceTime > ghostDef[ghostDef.length - 1].t + 400) {
+      this.ghost = null;
+      return;
+    }
     while (this.ghostPtr < ghostDef.length - 2 && ghostDef[this.ghostPtr + 1].t <= this.raceTime) {
       this.ghostPtr++;
     }
     const a = ghostDef[this.ghostPtr];
     const b = ghostDef[Math.min(this.ghostPtr + 1, ghostDef.length - 1)];
-    if (a.lap !== this.lap) {
-      this.ghost = null;
-      return;
-    }
     const span = Math.max(b.t - a.t, 1);
     const frac = clamp((this.raceTime - a.t) / span, 0, 1);
     // Don't interpolate across the lap wrap point
@@ -653,6 +688,13 @@ export class Game {
   private emitHud(): void {
     const now = performance.now();
     const finished = this.mode === 'finished';
+    // Show the best lap this player has ever set, not just the current race.
+    const bestEverLap =
+      this.best && this.best.lapMs.length > 0 ? Math.min(...this.best.lapMs) : null;
+    const bestLapMs =
+      this.bestLap !== null && bestEverLap !== null
+        ? Math.min(this.bestLap, bestEverLap)
+        : (this.bestLap ?? bestEverLap);
     const hud: HudSnapshot = {
       mode: this.mode,
       paused: this.paused,
@@ -661,7 +703,7 @@ export class Game {
       totalLaps: CFG.totalLaps,
       lapTimeMs: finished ? (this.lastLap ?? this.lapTime) : this.lapTime,
       lastLapMs: this.lastLap,
-      bestLapMs: this.bestLap,
+      bestLapMs,
       bestRaceMs: this.best?.totalMs ?? null,
       boostPct: this.boostMeter,
       boosting: this.boosting,

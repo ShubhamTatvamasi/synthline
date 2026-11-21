@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "SYNTHLINE — a synthwave pseudo-3D arcade racer built with Astro + Svelte",
   "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

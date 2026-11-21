@@ -112,15 +112,15 @@ function paintCar(ctx: CanvasRenderingContext2D, w: number, h: number, paint: Ca
     ctx.restore();
   }
 
-  // Wheels
+  // Wheels — reach the sprite bottom so the tyres stay visible below the body
   ctx.fillStyle = '#05040c';
-  rrect(ctx, padX - wheelW * 0.22, h - wheelH * 1.12, wheelW, wheelH, wheelW * 0.34);
+  rrect(ctx, padX - wheelW * 0.34, h - wheelH, wheelW, wheelH, wheelW * 0.34);
   ctx.fill();
-  rrect(ctx, w - padX - wheelW * 0.78, h - wheelH * 1.12, wheelW, wheelH, wheelW * 0.34);
+  rrect(ctx, w - padX - wheelW * 0.66, h - wheelH, wheelW, wheelH, wheelW * 0.34);
   ctx.fill();
   ctx.fillStyle = '#232038';
-  ctx.fillRect(padX + wheelW * 0.12, h - wheelH * 0.72, wheelW * 0.42, wheelH * 0.16);
-  ctx.fillRect(w - padX - wheelW * 0.54, h - wheelH * 0.72, wheelW * 0.42, wheelH * 0.16);
+  ctx.fillRect(padX - wheelW * 0.1, h - wheelH * 0.52, wheelW * 0.42, wheelH * 0.12);
+  ctx.fillRect(w - padX - wheelW * 0.32, h - wheelH * 0.52, wheelW * 0.42, wheelH * 0.12);
 
   // Cabin (body color shell + inset rear window)
   const cabinW = bodyW * 0.64;

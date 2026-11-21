@@ -65,6 +65,8 @@
 
     return () => {
       g.dispose();
+      const w = window as unknown as Record<string, unknown>;
+      if (w.__synthline === g) delete w.__synthline;
       game = null;
     };
   });
@@ -72,29 +74,43 @@
   function startRace(): void {
     finishStats = null;
     game?.unlockAudio();
+    game?.playUiClick();
     game?.beginRace();
   }
 
   function resume(): void {
+    game?.playUiClick();
     game?.resume();
   }
 
   function toMenu(): void {
+    game?.playUiClick();
     finishStats = null;
     game?.toMenu();
   }
 
   function toggleMusic(): void {
+    game?.playUiClick();
     game?.setMusic(!hud.musicOn);
   }
 
   function toggleSfx(): void {
+    // Play the confirmation before muting so turning SFX off still clicks.
+    game?.playUiClick();
     game?.setSfx(!hud.sfxOn);
   }
 
   function press(key: 'left' | 'right' | 'brake' | 'boost', down: boolean) {
     return (e: PointerEvent) => {
       e.preventDefault();
+      // Keep the button pressed even if the finger slides slightly off it.
+      if (down) {
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          /* pointer capture unsupported */
+        }
+      }
       game?.setVirtual(key, down);
     };
   }
@@ -106,6 +122,16 @@
   const bestLabel = $derived(
     hud.bestRaceMs != null ? formatTime(hud.bestRaceMs) : 'NO RECORD YET'
   );
+
+  const deltaMs = $derived(
+    finishStats?.previousBestMs != null
+      ? finishStats.totalMs - finishStats.previousBestMs
+      : null
+  );
+
+  function formatDelta(ms: number): string {
+    return `${ms < 0 ? '−' : '+'}${(Math.abs(ms) / 1000).toFixed(2)}s`;
+  }
 </script>
 
 <div class="game" class:touch={isTouch}>
@@ -118,7 +144,7 @@
   {#if racing || screen === 'paused' || screen === 'finished'}
     <div class="hud">
       <div class="hud-topleft">
-        <button
+        <button type="button"
           class="icon-btn"
           onclick={() => game?.pause()}
           aria-label="Pause"
@@ -152,7 +178,7 @@
       </div>
 
       {#if hud.toast}
-        <div class="toast">{hud.toast}</div>
+        <div class="toast" role="status" aria-live="polite">{hud.toast}</div>
       {/if}
 
       {#if hud.countdown !== null && hud.countdown > 0}
@@ -167,7 +193,7 @@
     {#if isTouch && racing && !hud.paused}
       <div class="touch-controls">
         <div class="tc-left">
-          <button
+          <button type="button"
             class="tbtn"
             aria-label="Steer left"
             onpointerdown={press('left', true)}
@@ -178,7 +204,7 @@
           >
             ◀
           </button>
-          <button
+          <button type="button"
             class="tbtn"
             aria-label="Steer right"
             onpointerdown={press('right', true)}
@@ -191,7 +217,7 @@
           </button>
         </div>
         <div class="tc-right">
-          <button
+          <button type="button"
             class="tbtn small"
             aria-label="Brake"
             onpointerdown={press('brake', true)}
@@ -202,7 +228,7 @@
           >
             BRAKE
           </button>
-          <button
+          <button type="button"
             class="tbtn small boost-btn"
             class:active={hud.boosting}
             aria-label="Boost"
@@ -230,7 +256,7 @@
           <p class="tagline">OUTRUN THE HORIZON</p>
         </div>
 
-        <button class="btn primary" onclick={startRace}>▶ START RACE</button>
+        <button type="button" class="btn primary" onclick={startRace}>▶ START RACE</button>
 
         <div class="best mono">BEST · {bestLabel}</div>
 
@@ -246,10 +272,10 @@
         </div>
 
         <div class="toggles">
-          <button class="btn small" class:off={!hud.musicOn} onclick={toggleMusic}>
+          <button type="button" class="btn small" class:off={!hud.musicOn} onclick={toggleMusic}>
             MUSIC {hud.musicOn ? 'ON' : 'OFF'}
           </button>
-          <button class="btn small" class:off={!hud.sfxOn} onclick={toggleSfx}>
+          <button type="button" class="btn small" class:off={!hud.sfxOn} onclick={toggleSfx}>
             SFX {hud.sfxOn ? 'ON' : 'OFF'}
           </button>
         </div>
@@ -267,15 +293,15 @@
     <div class="overlay dim">
       <h2 class="overlay-title">PAUSED</h2>
       <div class="stack">
-        <button class="btn primary" onclick={resume}>RESUME</button>
-        <button class="btn" onclick={startRace}>RESTART</button>
-        <button class="btn" onclick={toMenu}>MENU</button>
+        <button type="button" class="btn primary" onclick={resume}>RESUME</button>
+        <button type="button" class="btn" onclick={startRace}>RESTART</button>
+        <button type="button" class="btn" onclick={toMenu}>MENU</button>
       </div>
       <div class="toggles">
-        <button class="btn small" class:off={!hud.musicOn} onclick={toggleMusic}>
+        <button type="button" class="btn small" class:off={!hud.musicOn} onclick={toggleMusic}>
           MUSIC {hud.musicOn ? 'ON' : 'OFF'}
         </button>
-        <button class="btn small" class:off={!hud.sfxOn} onclick={toggleSfx}>
+        <button type="button" class="btn small" class:off={!hud.sfxOn} onclick={toggleSfx}>
           SFX {hud.sfxOn ? 'ON' : 'OFF'}
         </button>
       </div>
@@ -297,6 +323,10 @@
               <td>{formatTime(t)}</td>
             </tr>
           {/each}
+          <tr>
+            <td class="dim">BEST LAP</td>
+            <td>{formatTime(finishStats.bestLapMs)}</td>
+          </tr>
           <tr class="total">
             <td class="dim">TOTAL</td>
             <td>{formatTime(finishStats.totalMs)}</td>
@@ -306,12 +336,18 @@
               <td class="dim">PREVIOUS BEST</td>
               <td>{formatTime(finishStats.previousBestMs)}</td>
             </tr>
+            {#if deltaMs != null && deltaMs !== 0}
+              <tr class={deltaMs < 0 ? 'gain' : 'loss'}>
+                <td class="dim">{deltaMs < 0 ? 'GAIN' : 'GAP'}</td>
+                <td>{formatDelta(deltaMs)}</td>
+              </tr>
+            {/if}
           {/if}
         </tbody>
       </table>
       <div class="stack row">
-        <button class="btn primary" onclick={startRace}>RACE AGAIN</button>
-        <button class="btn" onclick={toMenu}>MENU</button>
+        <button type="button" class="btn primary" onclick={startRace}>RACE AGAIN</button>
+        <button type="button" class="btn" onclick={toMenu}>MENU</button>
       </div>
     </div>
   {/if}
@@ -331,6 +367,8 @@
   .game {
     position: fixed;
     inset: 0;
+    height: 100vh;
+    height: 100dvh;
     background: #05010f;
     font-family: 'Orbitron', 'Segoe UI', system-ui, sans-serif;
     color: #efeaf6;
@@ -382,6 +420,12 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
+  }
+
+  .icon-btn:focus-visible,
+  .tbtn:focus-visible {
+    outline: 2px solid #08f7fe;
+    outline-offset: 3px;
   }
 
   .icon-btn {
@@ -621,11 +665,21 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    /* "safe center" keeps the top reachable if content is taller than a
+       short landscape phone viewport. */
     justify-content: center;
+    justify-content: safe center;
     gap: 22px;
     padding: 24px;
     text-align: center;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     background: radial-gradient(ellipse at center, rgba(9, 2, 24, 0.55), rgba(5, 1, 15, 0.88));
+  }
+
+  .overlay > * {
+    flex: 0 0 auto;
   }
 
   .overlay.dim {
@@ -680,6 +734,11 @@
   .btn:focus-visible {
     box-shadow: 0 0 22px rgba(8, 247, 254, 0.45), inset 0 0 12px rgba(8, 247, 254, 0.12);
     transform: translateY(-1px);
+  }
+
+  .btn:focus-visible {
+    outline: 2px solid #08f7fe;
+    outline-offset: 3px;
   }
 
   .btn:active {
@@ -817,6 +876,14 @@
     font-weight: bold;
   }
 
+  .results .gain td {
+    color: #08f7fe;
+  }
+
+  .results .loss td {
+    color: #ff8da0;
+  }
+
   .stack {
     display: flex;
     flex-direction: column;
@@ -837,6 +904,66 @@
     .tbtn {
       width: 64px;
       height: 64px;
+    }
+    .tbtn.small {
+      width: 74px;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .hud-topleft,
+    .hud-topright {
+      top: max(8px, env(safe-area-inset-top));
+    }
+    .hud-topleft {
+      left: max(8px, env(safe-area-inset-left));
+    }
+    .hud-topright {
+      right: max(8px, env(safe-area-inset-right));
+    }
+    .info {
+      font-size: 11px;
+    }
+    .info .lap {
+      font-size: 12px;
+    }
+    .touch-controls {
+      padding-left: max(10px, env(safe-area-inset-left));
+      padding-right: max(10px, env(safe-area-inset-right));
+    }
+    .tbtn {
+      width: 58px;
+      height: 58px;
+      border-radius: 14px;
+    }
+    .tbtn.small {
+      width: 68px;
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+  }
+
+  /* Short landscape phones: keep the menu usable without clipping. */
+  @media (max-height: 560px) {
+    .overlay {
+      gap: 14px;
+      padding: 16px 20px;
+      background: rgba(5, 1, 15, 0.8);
+    }
+    .logo h1 {
+      font-size: clamp(34px, 11vh, 64px);
+    }
+    .tagline {
+      margin-top: 8px;
+    }
+    .btn.primary {
+      padding: 12px 30px;
+    }
+    .overlay footer {
+      display: none;
+    }
+    .help {
+      font-size: 12px;
     }
   }
 </style>

@@ -50,6 +50,7 @@ export class Renderer {
   private W = 0;
   private H = 0;
   private dpr = 1;
+  private reduceMotion = false;
 
   private sprites: SpriteBundle | null = null;
   private mountains: MountainLayer[] = [];
@@ -63,6 +64,9 @@ export class Renderer {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('2D canvas context unavailable');
     this.ctx = ctx;
+    this.reduceMotion =
+      typeof window !== 'undefined' &&
+      !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   }
 
   /** Build all procedural assets. Call once, after fonts are ready. */
@@ -112,10 +116,11 @@ export class Renderer {
     if (!this.sprites || !this.sun) return;
 
     ctx.save();
-    if (s.shake > 0.01) {
+    const shake = this.reduceMotion ? s.shake * 0.2 : s.shake;
+    if (shake > 0.01) {
       ctx.translate(
-        (Math.random() - 0.5) * s.shake * 16,
-        (Math.random() - 0.5) * s.shake * 12,
+        (Math.random() - 0.5) * shake * 16,
+        (Math.random() - 0.5) * shake * 12,
       );
     }
 
@@ -133,7 +138,9 @@ export class Renderer {
     // Stars
     ctx.fillStyle = '#cfd8ff';
     for (const star of this.stars) {
-      const a = 0.3 + 0.4 * (0.5 + 0.5 * Math.sin(s.time * 1.7 + star.phase));
+      const a = this.reduceMotion
+        ? 0.55
+        : 0.3 + 0.4 * (0.5 + 0.5 * Math.sin(s.time * 1.7 + star.phase));
       ctx.globalAlpha = a * (1 - star.y);
       const sy = star.y * horizon * 0.92 + bgShift * 0.4;
       ctx.fillRect(star.x * W, sy, star.r, star.r);
@@ -248,12 +255,17 @@ export class Renderer {
       }
 
       if (segment === playerSegment) {
-        // Player car, bottom of the screen, sitting on the road surface
+        // Player car, bottom of the screen, sitting on the road surface.
+        // Slightly smaller than the raw projection and lifted a few pixels so
+        // the tyres and contact shadow stay on-screen.
         const playerScale = camDepth / playerZRender;
         const camYi = interpolate(playerSegment.p1.camera.y, playerSegment.p2.camera.y, playerPercent);
-        const destY = H / 2 - (playerScale * camYi * H) / 2;
-        const carW = playerScale * CAR_WORLD_W * (W / 2);
-        const bounce = Math.sin(s.time * 34) * s.speedPct * resolution * 1.3;
+        const lift = Math.max(4, H * 0.006);
+        const destY = H / 2 - (playerScale * camYi * H) / 2 - lift;
+        const carW = playerScale * CAR_WORLD_W * (W / 2) * 0.88;
+        const bounce = this.reduceMotion
+          ? 0
+          : Math.sin(s.time * 34) * s.speedPct * resolution * 1.1;
         drawPlayerCar(
           ctx,
           W / 2 + s.steer * W * 0.015,
@@ -269,7 +281,7 @@ export class Renderer {
 
     // ——— Boost / top-speed speed lines ————————————————————————————
     const fxLevel = Math.max(s.boostGlow, clamp((s.speedPct - 0.96) * 8, 0, 1));
-    if (fxLevel > 0.02) {
+    if (fxLevel > 0.02 && !this.reduceMotion) {
       const cx = W / 2;
       const cy = H * 0.55;
       const count = s.boosting ? 20 : 8;
